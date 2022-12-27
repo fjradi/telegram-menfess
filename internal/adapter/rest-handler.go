@@ -23,6 +23,7 @@ func (r *RestHandler) Handle(w http.ResponseWriter, req *http.Request) {
 	body, err := ioutil.ReadAll(req.Body)
 	if err != nil {
 		log.Printf("could not read request body %s", err.Error())
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 	log.Printf("request body is %s", string(body))
@@ -35,12 +36,12 @@ func (r *RestHandler) Handle(w http.ResponseWriter, req *http.Request) {
 
 	if err := json.Unmarshal(body, &update); err != nil {
 		log.Printf("error unmarshalling message %s", err.Error())
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
 	if err := r.service.ReceiveMessage(update.Message); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
