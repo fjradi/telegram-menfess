@@ -23,7 +23,14 @@ func (p *Postgres) SaveMessage(message domain.Message) error {
 		fileId = &message.Photo[0].FileId
 	}
 
-	_, err := p.db.Exec("INSERT INTO message (message_id, chat_id, text, username, file_id) VALUES ($1, $2, $3, $4, $5)", message.Id, message.Chat.Id, message.Text, message.From.Username, fileId)
+	var text string
+	if message.Text != "" {
+		text = message.Text
+	} else if message.Caption != "" {
+		text = message.Caption
+	}
+
+	_, err := p.db.Exec("INSERT INTO message (message_id, chat_id, text, username, file_id) VALUES ($1, $2, $3, $4, $5)", message.Id, message.Chat.Id, text, message.From.Username, fileId)
 	if err != nil {
 		log.Printf("error inserting message into database %s", err.Error())
 		return err
