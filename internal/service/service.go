@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -20,10 +21,14 @@ type Service struct {
 	inGoingMessageQueue  port.IngoingMessageQueue
 	botToken             string
 	channelChatId        int
+	httpClient           *http.Client
 }
 
 func NewService(repo port.Repository, memoryRepo port.MemoryRepository, outGoingMessageQueue port.OutgoingMessageQueue, inGoingMessageQueue port.IngoingMessageQueue, botToken string, channelChatId int) *Service {
-	svc := &Service{repo: repo, memoryRepo: memoryRepo, outGoingMessageQueue: outGoingMessageQueue, inGoingMessageQueue: inGoingMessageQueue, botToken: botToken, channelChatId: channelChatId}
+	tr := &http.Transport{}
+	client := &http.Client{Transport: tr}
+
+	svc := &Service{repo: repo, memoryRepo: memoryRepo, outGoingMessageQueue: outGoingMessageQueue, inGoingMessageQueue: inGoingMessageQueue, botToken: botToken, channelChatId: channelChatId, httpClient: client}
 
 	go func() {
 		err := svc.start()
@@ -139,7 +144,7 @@ func (s *Service) forwardMessage(message domain.Message) error {
 		}
 	}
 
-	response, err := http.PostForm(sendMessageEndpoint, body)
+	response, err := s.httpClient.PostForm(sendMessageEndpoint, body)
 
 	if err != nil {
 		log.Printf("error sending message %s", err.Error())
@@ -149,6 +154,8 @@ func (s *Service) forwardMessage(message domain.Message) error {
 
 	if response.StatusCode != http.StatusOK {
 		return s.logResponse(response)
+	} else {
+		io.Copy(ioutil.Discard, response.Body)
 	}
 
 	return nil
@@ -157,7 +164,7 @@ func (s *Service) forwardMessage(message domain.Message) error {
 func (s *Service) replyMessage(chatId int, replyText string) error {
 	replyMessageEndpoint := "https://api.telegram.org/bot" + s.botToken + "/sendMessage"
 
-	response, err := http.PostForm(replyMessageEndpoint, url.Values{
+	response, err := s.httpClient.PostForm(replyMessageEndpoint, url.Values{
 		"chat_id": {strconv.Itoa(chatId)},
 		"text":    {replyText},
 	})
@@ -170,6 +177,8 @@ func (s *Service) replyMessage(chatId int, replyText string) error {
 
 	if response.StatusCode != http.StatusOK {
 		return s.logResponse(response)
+	} else {
+		io.Copy(ioutil.Discard, response.Body)
 	}
 
 	return nil
