@@ -7,20 +7,23 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
 	"telegram/internal/domain"
 	"telegram/internal/port"
+	"time"
 )
 
 type Service struct {
 	repo                 port.Repository
+	memoryRepo           port.MemoryRepository
 	outGoingMessageQueue port.OutgoingMessageQueue
 	inGoingMessageQueue  port.IngoingMessageQueue
 	botToken             string
 	channelChatId        int
 }
 
-func NewService(repo port.Repository, outGoingMessageQueue port.OutgoingMessageQueue, inGoingMessageQueue port.IngoingMessageQueue, botToken string, channelChatId int) *Service {
-	svc := &Service{repo: repo, outGoingMessageQueue: outGoingMessageQueue, inGoingMessageQueue: inGoingMessageQueue, botToken: botToken, channelChatId: channelChatId}
+func NewService(repo port.Repository, memoryRepo port.MemoryRepository, outGoingMessageQueue port.OutgoingMessageQueue, inGoingMessageQueue port.IngoingMessageQueue, botToken string, channelChatId int) *Service {
+	svc := &Service{repo: repo, memoryRepo: memoryRepo, outGoingMessageQueue: outGoingMessageQueue, inGoingMessageQueue: inGoingMessageQueue, botToken: botToken, channelChatId: channelChatId}
 
 	go func() {
 		err := svc.start()
@@ -52,34 +55,60 @@ func (s *Service) ReceiveMessage(message domain.Message) error {
 		return nil
 	}
 
-	errChan := make(chan error)
-
-	go func() {
-		err := s.sendMessage(message)
-		errChan <- err
-	}()
-
-	go func() {
-		err := s.outGoingMessageQueue.PublishMessage(message)
-		errChan <- err
-	}()
-
-	var errs []error
-	for i := 0; i < 2; i++ {
-		err := <-errChan
-		errs = append(errs, err)
+	latestSentMessageTimestamp, err := s.getLatestSentMessageTimestamp(message.From.Id)
+	if err != nil {
+		return err
 	}
 
-	for _, err := range errs {
+	if time.Now().Sub(latestSentMessageTimestamp) >= 5*time.Minute {
+		err = s.forwardMessage(message)
 		if err != nil {
 			return err
 		}
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			s.memoryRepo.SaveLatestSentMessageTimestamp(message.From.Id, time.Now().Unix())
+			s.replyMessage(message.Chat.Id, "Pesan kamu telah terkirim ke channel")
+		}()
+		go func() {
+			defer wg.Done()
+			s.outGoingMessageQueue.PublishMessage(message)
+		}()
+
+		wg.Wait()
+		return nil
+	}
+
+	ellapsedTime := time.Now().Sub(latestSentMessageTimestamp)
+	remainingDuration := 5*time.Minute - ellapsedTime
+	remainingDurationMinute := int(remainingDuration.Minutes())
+	remainingDurationSecond := int(remainingDuration.Seconds()) - remainingDurationMinute*60
+
+	err = s.replyMessage(message.Chat.Id, "Mohon tunggu "+strconv.Itoa(remainingDurationMinute)+" menit "+strconv.Itoa(remainingDurationSecond)+" detik lagi untuk mengirim pesan")
+	if err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func (s *Service) sendMessage(message domain.Message) error {
+func (s *Service) getLatestSentMessageTimestamp(userId int) (time.Time, error) {
+	latestSentMessageTimestamp, err := s.memoryRepo.GetLatestSentMessageTimestamp(userId)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	if latestSentMessageTimestamp == 0 {
+		return time.Time{}, nil
+	}
+
+	return time.Unix(latestSentMessageTimestamp, 0), nil
+}
+
+func (s *Service) forwardMessage(message domain.Message) error {
 	sendMessageEndpoint := "https://api.telegram.org/bot" + s.botToken
 
 	var text string
@@ -93,25 +122,24 @@ func (s *Service) sendMessage(message domain.Message) error {
 		text = text + " @" + *message.From.Username
 	}
 
-	var fileId *string
+	var body url.Values
 	if len(message.Photo) > 0 {
-		fileId = &message.Photo[0].FileId
-	}
-
-	var response *http.Response
-	var err error
-	if fileId != nil {
-		response, err = http.PostForm(sendMessageEndpoint+"/sendPhoto", url.Values{
+		sendMessageEndpoint = sendMessageEndpoint + "/sendPhoto"
+		fileId := message.Photo[0].FileId
+		body = url.Values{
 			"chat_id": {strconv.Itoa(s.channelChatId)},
-			"photo":   {*fileId},
+			"photo":   {fileId},
 			"caption": {text},
-		})
+		}
 	} else {
-		response, err = http.PostForm(sendMessageEndpoint+"/sendMessage", url.Values{
+		sendMessageEndpoint = sendMessageEndpoint + "/sendMessage"
+		body = url.Values{
 			"chat_id": {strconv.Itoa(s.channelChatId)},
 			"text":    {text},
-		})
+		}
 	}
+
+	response, err := http.PostForm(sendMessageEndpoint, body)
 
 	if err != nil {
 		log.Printf("error sending message %s", err.Error())
@@ -120,17 +148,42 @@ func (s *Service) sendMessage(message domain.Message) error {
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		var bodyBytes, errRead = ioutil.ReadAll(response.Body)
-		if errRead != nil {
-			log.Printf("error in parsing telegram answer %s", errRead.Error())
-			return errRead
-		}
-
-		bodyString := string(bodyBytes)
-		log.Printf("Body of Telegram Response: %s", bodyString)
-
-		return errors.New("telegram response status code is not 200")
+		return s.logResponse(response)
 	}
 
 	return nil
+}
+
+func (s *Service) replyMessage(chatId int, replyText string) error {
+	replyMessageEndpoint := "https://api.telegram.org/bot" + s.botToken + "/sendMessage"
+
+	response, err := http.PostForm(replyMessageEndpoint, url.Values{
+		"chat_id": {strconv.Itoa(chatId)},
+		"text":    {replyText},
+	})
+
+	if err != nil {
+		log.Printf("error sending message %s", err.Error())
+		return err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return s.logResponse(response)
+	}
+
+	return nil
+}
+
+func (s *Service) logResponse(response *http.Response) error {
+	bodyBytes, errRead := ioutil.ReadAll(response.Body)
+	if errRead != nil {
+		log.Printf("error in parsing telegram answer %s", errRead.Error())
+		return errRead
+	}
+
+	bodyString := string(bodyBytes)
+	log.Printf("Body of Telegram Response: %s", bodyString)
+
+	return errors.New("telegram response status code is not 200")
 }

@@ -10,6 +10,7 @@ import (
 	"telegram/internal/service"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
@@ -42,12 +43,22 @@ func main() {
 	log.Println("Connected to database")
 	defer db.Close()
 
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     os.Getenv("REDIS_HOST") + ":" + os.Getenv("REDIS_PORT"),
+		Username: os.Getenv("REDIS_USERNAME"),
+		Password: os.Getenv("REDIS_PASSWORD"),
+		DB:       0,
+	})
+	log.Println("Connected to redis")
+	defer redisClient.Close()
+
 	kafkaProducer := adapter.NewKafkaProducer(producer)
 	kafkaConsumer, err := adapter.NewKafkaConsumer(consumer)
 	if err != nil {
 		log.Panicf("Failed to create kafka consumer: %s", err)
 	}
 	postgres := adapter.NewPostgres(db)
+	redis := adapter.NewRedis(redisClient)
 
 	channelChatId := os.Getenv("CHANNEL_CHAT_ID")
 	channelChatIdInt, err := strconv.Atoi(channelChatId)
@@ -55,7 +66,7 @@ func main() {
 		log.Panicf("Failed to convert channel chat id to int: %s", err)
 	}
 
-	myService := service.NewService(postgres, kafkaProducer, kafkaConsumer, os.Getenv("TELEGRAM_BOT_TOKEN"), channelChatIdInt)
+	myService := service.NewService(postgres, redis, kafkaProducer, kafkaConsumer, os.Getenv("TELEGRAM_BOT_TOKEN"), channelChatIdInt)
 
 	restHandler := adapter.NewRestHandler(myService)
 
