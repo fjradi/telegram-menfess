@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
+	_ "embed"
 	"log"
 	"net/http"
 	"os"
@@ -17,6 +18,12 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/rs/cors"
 )
+
+//go:embed cert.pem
+var certFile []byte
+
+//go:embed key.pem
+var keyFile []byte
 
 func main() {
 	godotenv.Load()
@@ -93,6 +100,21 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", restHandler.Handle)
 	handler := cors.Default().Handler(mux)
+
+	cert, err := tls.X509KeyPair(certFile, keyFile)
+	if err != nil {
+		log.Panicf("Failed to load certificate: %s", err)
+	}
+	config := &tls.Config{Certificates: []tls.Certificate{cert}}
+	server := &http.Server{
+		Addr:      ":443",
+		Handler:   handler,
+		TLSConfig: config,
+	}
 	log.Printf("Server is running on port 443")
-	http.ListenAndServeTLS(":443", "./cert/cert.pem", "./cert/key.pem", handler)
+	if err = server.ListenAndServeTLS("", ""); err != nil {
+		log.Panicf("Failed to start server: %s", err)
+	} else {
+		log.Println("Server stopped")
+	}
 }
