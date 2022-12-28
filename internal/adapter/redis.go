@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"log"
 	"strconv"
 
 	"github.com/go-redis/redis/v8"
@@ -25,6 +26,7 @@ func (r *Redis) GetLatestSentMessageTimestamp(userId int) (int64, error) {
 	if err == redis.Nil {
 		return 0, nil
 	} else if err != nil {
+		log.Println("error getting latest sent message timestamp", err.Error())
 		return 0, err
 	}
 
