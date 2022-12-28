@@ -65,7 +65,7 @@ func (s *Service) ReceiveMessage(message domain.Message) error {
 		return err
 	}
 
-	if time.Now().Sub(latestSentMessageTimestamp) >= 5*time.Minute {
+	if time.Now().Sub(latestSentMessageTimestamp) >= 15*time.Minute {
 		err = s.forwardMessage(message)
 		if err != nil {
 			return err
@@ -88,7 +88,7 @@ func (s *Service) ReceiveMessage(message domain.Message) error {
 	}
 
 	ellapsedTime := time.Now().Sub(latestSentMessageTimestamp)
-	remainingDuration := 5*time.Minute - ellapsedTime
+	remainingDuration := 15*time.Minute - ellapsedTime
 	remainingDurationMinute := int(remainingDuration.Minutes())
 	remainingDurationSecond := int(remainingDuration.Seconds()) - remainingDurationMinute*60
 
