@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"crypto/tls"
 	"database/sql"
 	"log"
 	"net/http"
@@ -13,12 +15,20 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/rs/cors"
 )
 
 func main() {
 	godotenv.Load()
 
-	producer, err := kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": os.Getenv("KAFKA_BOOTSTRAP_SERVERS")})
+	producer, err := kafka.NewProducer(&kafka.ConfigMap{
+		"bootstrap.servers":  os.Getenv("KAFKA_BOOTSTRAP_SERVERS"),
+		"security.protocol":  "SASL_SSL",
+		"sasl.mechanisms":    "PLAIN",
+		"sasl.username":      os.Getenv("KAFKA_USERNAME"),
+		"sasl.password":      os.Getenv("KAFKA_PASSWORD"),
+		"session.timeout.ms": 45000,
+	})
 	if err != nil {
 		log.Panicf("Failed to create producer: %s", err)
 	}
@@ -26,9 +36,14 @@ func main() {
 	defer producer.Close()
 
 	consumer, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers": os.Getenv("KAFKA_BOOTSTRAP_SERVERS"),
-		"group.id":          "myGroup",
-		"auto.offset.reset": "earliest",
+		"bootstrap.servers":  os.Getenv("KAFKA_BOOTSTRAP_SERVERS"),
+		"group.id":           "myGroup",
+		"auto.offset.reset":  "earliest",
+		"security.protocol":  "SASL_SSL",
+		"sasl.mechanisms":    "PLAIN",
+		"sasl.username":      os.Getenv("KAFKA_USERNAME"),
+		"sasl.password":      os.Getenv("KAFKA_PASSWORD"),
+		"session.timeout.ms": 45000,
 	})
 	if err != nil {
 		log.Panicf("Failed to create consumer: %s", err)
@@ -47,8 +62,14 @@ func main() {
 		Addr:     os.Getenv("REDIS_HOST") + ":" + os.Getenv("REDIS_PORT"),
 		Username: os.Getenv("REDIS_USERNAME"),
 		Password: os.Getenv("REDIS_PASSWORD"),
-		DB:       0,
+		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
+		DB: 0,
 	})
+	if err := redisClient.Ping(context.Background()).Err(); err != nil {
+		log.Panicf("Failed to connect to redis: %s", err)
+	}
 	log.Println("Connected to redis")
 	defer redisClient.Close()
 
@@ -70,7 +91,9 @@ func main() {
 
 	restHandler := adapter.NewRestHandler(myService)
 
-	http.HandleFunc("/", restHandler.Handle)
-	log.Printf("Server is running on port 8080")
-	http.ListenAndServe(":8080", nil)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", restHandler.Handle)
+	handler := cors.Default().Handler(mux)
+	log.Printf("Server is running on port 443")
+	http.ListenAndServeTLS(":443", "./cert/cert.pem", "./cert/key.pem", handler)
 }
