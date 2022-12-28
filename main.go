@@ -22,7 +22,7 @@ import (
 //go:embed cert.pem
 var certFile []byte
 
-//go:embed key.pem
+//go:embed key.key
 var keyFile []byte
 
 func main() {
