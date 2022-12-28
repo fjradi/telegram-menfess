@@ -22,12 +22,11 @@ func main() {
 	godotenv.Load()
 
 	producer, err := kafka.NewProducer(&kafka.ConfigMap{
-		"bootstrap.servers":  os.Getenv("KAFKA_BOOTSTRAP_SERVERS"),
-		"security.protocol":  "SASL_SSL",
-		"sasl.mechanisms":    "PLAIN",
-		"sasl.username":      os.Getenv("KAFKA_USERNAME"),
-		"sasl.password":      os.Getenv("KAFKA_PASSWORD"),
-		"session.timeout.ms": 45000,
+		"bootstrap.servers": os.Getenv("KAFKA_BOOTSTRAP_SERVERS"),
+		"security.protocol": "SASL_SSL",
+		"sasl.mechanisms":   "PLAIN",
+		"sasl.username":     os.Getenv("KAFKA_USERNAME"),
+		"sasl.password":     os.Getenv("KAFKA_PASSWORD"),
 	})
 	if err != nil {
 		log.Panicf("Failed to create producer: %s", err)
