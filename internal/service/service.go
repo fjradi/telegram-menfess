@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"telegram/internal/domain"
 	"telegram/internal/port"
@@ -60,13 +61,23 @@ func (s *Service) ReceiveMessage(message domain.Message) error {
 		return nil
 	}
 
+	gender, err := s.getGender(message)
+	if errors.Is(err, domain.InvalidMessageError) {
+		err = s.replyMessage(message.Chat.Id, "Mohon maaf, pesan kamu tidak valid")
+		if err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+
 	latestSentMessageTimestamp, err := s.getLatestSentMessageTimestamp(message.From.Id)
 	if err != nil {
 		return err
 	}
 
 	if time.Now().Sub(latestSentMessageTimestamp) >= 15*time.Minute {
-		err = s.forwardMessage(message)
+		err = s.forwardMessage(message, gender)
 		if err != nil {
 			return err
 		}
@@ -113,7 +124,7 @@ func (s *Service) getLatestSentMessageTimestamp(userId int) (time.Time, error) {
 	return time.Unix(latestSentMessageTimestamp, 0), nil
 }
 
-func (s *Service) forwardMessage(message domain.Message) error {
+func (s *Service) forwardMessage(message domain.Message, gender domain.Gender) error {
 	sendMessageEndpoint := "https://api.telegram.org/bot" + s.botToken
 
 	var text string
@@ -125,6 +136,12 @@ func (s *Service) forwardMessage(message domain.Message) error {
 
 	if message.From.Username != nil {
 		text = text + " @" + *message.From.Username
+	}
+
+	if gender == domain.Male {
+		text = text + " 🧑‍🦰 "
+	} else if gender == domain.Female {
+		text = text + " 👩 "
 	}
 
 	var body url.Values
@@ -195,4 +212,32 @@ func (s *Service) logResponse(response *http.Response) error {
 	log.Printf("Body of Telegram Response: %s", bodyString)
 
 	return errors.New("telegram response status code is not 200")
+}
+
+func (s *Service) getGender(message domain.Message) (domain.Gender, error) {
+	var text string
+	if message.Text != "" {
+		text = message.Text
+	} else if message.Caption != "" {
+		text = message.Caption
+	} else {
+		return domain.Male, domain.InvalidMessageError
+	}
+
+	text = strings.ToLower(text)
+	text = strings.TrimSpace(text)
+
+	words := strings.Split(text, " ")
+	if len(words) <= 1 {
+		return domain.Male, domain.InvalidMessageError
+	}
+
+	lastWord := words[len(words)-1]
+	if lastWord == "#male" {
+		return domain.Male, nil
+	} else if lastWord == "#female" {
+		return domain.Female, nil
+	}
+
+	return domain.Male, domain.InvalidMessageError
 }

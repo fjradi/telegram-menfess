@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 )
 
@@ -41,3 +42,12 @@ func (m Message) ToJson() ([]byte, error) {
 
 	return jsonByte, nil
 }
+
+type Gender int
+
+const (
+	Male   Gender = iota
+	Female Gender = iota
+)
+
+var InvalidMessageError = errors.New("invalid message")
