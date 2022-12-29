@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"strconv"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -18,7 +19,7 @@ func NewRedis(client *redis.Client) *Redis {
 }
 
 func (r *Redis) SaveLatestSentMessageTimestamp(userId int, timestamp int64) error {
-	return r.client.Set(r.ctx, strconv.Itoa(userId), timestamp, 0).Err()
+	return r.client.Set(r.ctx, strconv.Itoa(userId), timestamp, time.Duration(24*time.Hour)).Err()
 }
 
 func (r *Redis) GetLatestSentMessageTimestamp(userId int) (int64, error) {
