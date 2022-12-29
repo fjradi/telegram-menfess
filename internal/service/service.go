@@ -64,9 +64,7 @@ func (s *Service) ReceiveMessage(message domain.Message) error {
 	gender, err := s.getGender(message)
 	if errors.Is(err, domain.InvalidMessageError) {
 		err = s.replyMessage(message.Chat.Id, "Mohon maaf, pesan kamu tidak valid")
-		if err != nil {
-			return err
-		}
+		return err
 	} else if err != nil {
 		return err
 	}
